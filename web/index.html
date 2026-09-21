@@ -457,6 +457,7 @@
   let velY = 0, velX = 0;
   const SPIN_FRICTION = 0.95;
   const SPIN_STOP = 0.006;
+  const FLASH_DURATION = 900;
 
   function project(lat, lon, radius, cx, cy){
     const φ = lat * Math.PI/180;
@@ -598,6 +599,29 @@
       ctx.arc(proj.x, proj.y, rad, 0, Math.PI*2);
       ctx.fillStyle = `rgba(${color},${Math.min(1, depthAlpha+0.15)})`;
       ctx.fill();
+
+      if (!isSelf && p.bornAt){
+        const age = t - p.bornAt;
+        if (age >= 0 && age < FLASH_DURATION){
+          const ft = age / FLASH_DURATION;
+          const eased = 1 - Math.pow(1 - ft, 3);
+          const fade = (1 - ft) * depthAlpha;
+
+          const burst = ctx.createRadialGradient(proj.x, proj.y, 0, proj.x, proj.y, rad*8);
+          burst.addColorStop(0, `rgba(${color},${fade*0.55})`);
+          burst.addColorStop(1, `rgba(${color},0)`);
+          ctx.fillStyle = burst;
+          ctx.beginPath();
+          ctx.arc(proj.x, proj.y, rad*8, 0, Math.PI*2);
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.arc(proj.x, proj.y, rad + eased*20, 0, Math.PI*2);
+          ctx.strokeStyle = `rgba(${color},${fade*0.85})`;
+          ctx.lineWidth = 2 * (1 - ft) + 0.4;
+          ctx.stroke();
+        }
+      }
     });
 
     if (dragging){
@@ -686,10 +710,19 @@
     presenceChannel
       .on('presence', { event: 'sync' }, () => {
         const state = presenceChannel.presenceState();
-        peers.clear();
+        const seen = new Set();
         Object.entries(state).forEach(([key, metas]) => {
           if (key === self.id || !metas || !metas[0]) return;
-          peers.set(key, { lat: metas[0].lat, lon: metas[0].lon });
+          seen.add(key);
+          const prev = peers.get(key);
+          peers.set(key, {
+            lat: metas[0].lat,
+            lon: metas[0].lon,
+            bornAt: prev ? prev.bornAt : performance.now()
+          });
+        });
+        Array.from(peers.keys()).forEach(key => {
+          if (!seen.has(key)) peers.delete(key);
         });
         updateReadout();
         bumpRecordIfNeeded();
