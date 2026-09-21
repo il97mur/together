@@ -467,7 +467,13 @@
   // --- realtime connection (PartyKit) ---
 
   function partyHost(){
-    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1'){
+    // opening the file directly (file://) leaves location.hostname empty —
+    // treat that the same as localhost so local dev works without a static server
+    const isLocal = location.protocol === 'file:'
+      || location.hostname === 'localhost'
+      || location.hostname === '127.0.0.1'
+      || location.hostname === '';
+    if (isLocal){
       return { host: 'localhost:1999', proto: 'ws' };
     }
     // update this after your first `npx partykit deploy` if the assigned host differs
