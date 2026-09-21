@@ -6,6 +6,7 @@
 <title>Together</title>
 <meta name="description" content="A live wireframe globe — every open tab becomes a point of light.">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
   :root{
     --bg: #05060a;
@@ -259,7 +260,7 @@
   const rnd = seededRandom(hashStr('seed-' + Math.random()));
   const [anchorLat, anchorLon] = approxLocationFromTimezone();
   const self = {
-    id: null, // assigned by the server on connect
+    id: (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'p-' + Math.random().toString(36).slice(2,10),
     lat: Math.max(-85, Math.min(85, anchorLat + (rnd() - 0.5) * 8)),
     lon: ((anchorLon + (rnd() - 0.5) * 10 + 540) % 360) - 180
   };
@@ -464,57 +465,76 @@
     recordValueEl.textContent = record || '—';
   }
 
-  // --- realtime connection (PartyKit) ---
+  // --- realtime connection (Supabase Realtime) ---
 
-  function partyHost(){
-    // opening the file directly (file://) leaves location.hostname empty —
-    // treat that the same as localhost so local dev works without a static server
-    const isLocal = location.protocol === 'file:'
-      || location.hostname === 'localhost'
-      || location.hostname === '127.0.0.1'
-      || location.hostname === '';
-    if (isLocal){
-      return { host: 'localhost:1999', proto: 'ws' };
+  // fill these in from your Supabase project's Settings → API page
+  const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';
+  const SUPABASE_ANON_KEY = 'YOUR-ANON-PUBLIC-KEY';
+
+  const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  async function bumpRecordIfNeeded(){
+    const count = peers.size + 1;
+    if (count <= record) return;
+    const { data, error } = await client
+      .from('globe_stats')
+      .update({ record: count })
+      .eq('id', 1)
+      .lt('record', count)
+      .select('record')
+      .single();
+    if (!error && data){
+      record = data.record;
+      updateReadout();
     }
-    // update this after your first `npx partykit deploy` if the assigned host differs
-    return { host: 'together.il97mur.partykit.dev', proto: 'wss' };
+  }
+
+  async function loadInitialRecord(){
+    const { data } = await client.from('globe_stats').select('record').eq('id', 1).single();
+    if (data){
+      record = data.record;
+      updateReadout();
+    }
+  }
+
+  function watchRecordChanges(){
+    client
+      .channel('globe-stats-changes')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'globe_stats' }, (payload) => {
+        if (typeof payload.new.record === 'number' && payload.new.record > record){
+          record = payload.new.record;
+          updateReadout();
+        }
+      })
+      .subscribe();
   }
 
   function connect(){
-    const { host, proto } = partyHost();
-    const ws = new WebSocket(`${proto}://${host}/parties/main/globe`);
+    const presenceChannel = client.channel('globe-room', {
+      config: { presence: { key: self.id } }
+    });
 
-    ws.addEventListener('message', (evt) => {
-      let msg;
-      try { msg = JSON.parse(evt.data); } catch(e) { return; }
-
-      if (msg.type === 'welcome'){
-        self.id = msg.selfId;
-        record = msg.record || 0;
-        ws.send(JSON.stringify({ type: 'presence', lat: self.lat, lon: self.lon }));
-        updateReadout();
-      } else if (msg.type === 'peers'){
+    presenceChannel
+      .on('presence', { event: 'sync' }, () => {
+        const state = presenceChannel.presenceState();
         peers.clear();
-        (msg.peers || []).forEach(p => {
-          if (p.id === self.id) return;
-          peers.set(p.id, { lat: p.lat, lon: p.lon });
+        Object.entries(state).forEach(([key, metas]) => {
+          if (key === self.id || !metas || !metas[0]) return;
+          peers.set(key, { lat: metas[0].lat, lon: metas[0].lon });
         });
         updateReadout();
-      } else if (msg.type === 'record'){
-        record = msg.record || record;
-        updateReadout();
-      }
-    });
-
-    ws.addEventListener('close', () => {
-      peers.clear();
-      updateReadout();
-      setTimeout(connect, 1500);
-    });
-    ws.addEventListener('error', () => ws.close());
+        bumpRecordIfNeeded();
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED'){
+          await presenceChannel.track({ lat: self.lat, lon: self.lon });
+        }
+      });
   }
 
   updateReadout();
+  loadInitialRecord();
+  watchRecordChanges();
   connect();
 })();
 </script>
