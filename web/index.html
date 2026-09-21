@@ -467,11 +467,11 @@
 
   // --- realtime connection (Supabase Realtime) ---
 
-  // fill these in from your Supabase project's Settings → API page
-  const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';
-  const SUPABASE_ANON_KEY = 'YOUR-ANON-PUBLIC-KEY';
+  // from this project's Settings → Data API page
+  const SUPABASE_URL = 'https://sqkhsaqtplbmtupeitap.supabase.co';
+  const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_7md6zecQuWLhuq97DGBCVA_lms7H06Q';
 
-  const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 
   async function bumpRecordIfNeeded(){
     const count = peers.size + 1;
