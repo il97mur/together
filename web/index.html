@@ -22,6 +22,7 @@
   html, body{
     height:100%;
     margin:0;
+    overscroll-behavior: none;
   }
   body{
     background: var(--bg);
@@ -53,6 +54,10 @@
     display:block;
     cursor:grab;
     touch-action:none;
+    -webkit-touch-callout:none;
+    -webkit-user-select:none;
+    user-select:none;
+    -webkit-tap-highlight-color:transparent;
   }
   canvas.dragging{
     cursor:grabbing;
@@ -145,6 +150,58 @@
     opacity:0.7;
   }
 
+  #corner-actions{
+    position:absolute;
+    top: max(3vh, calc(20px + env(safe-area-inset-top, 0px)));
+    right: max(3vw, calc(20px + env(safe-area-inset-right, 0px)));
+    display:flex;
+    gap:10px;
+  }
+  #corner-actions a,
+  #corner-actions button{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    width:34px;
+    height:34px;
+    padding:0;
+    border:none;
+    background:none;
+    color: var(--ink-dim);
+    opacity:0.6;
+    cursor:pointer;
+    -webkit-tap-highlight-color:transparent;
+    transition: opacity 0.2s ease, color 0.2s ease;
+  }
+  #corner-actions a:hover,
+  #corner-actions a:focus-visible,
+  #corner-actions button:hover,
+  #corner-actions button:focus-visible{
+    opacity:1;
+    color: var(--ink);
+    outline:none;
+  }
+  #corner-actions svg{
+    width:17px;
+    height:17px;
+  }
+
+  #toast{
+    position:absolute;
+    top: max(3vh, calc(58px + env(safe-area-inset-top, 0px)));
+    right: max(3vw, calc(20px + env(safe-area-inset-right, 0px)));
+    font-size:10px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    color: var(--ink-dim);
+    opacity:0;
+    pointer-events:none;
+    transition: opacity 0.3s ease;
+  }
+  #toast.visible{
+    opacity:0.85;
+  }
+
   @media (max-width: 480px){
     #wordmark{ top: max(5vh, calc(20px + env(safe-area-inset-top, 0px))); }
     #readout{ bottom: max(5vh, calc(22px + env(safe-area-inset-bottom, 0px))); }
@@ -166,6 +223,18 @@
     <div id="status"><span class="dot"></span><span id="status-text">just you, for now</span></div>
     <div id="record-line">record <span id="record-value">—</span> at once</div>
   </div>
+  <div id="corner-actions">
+    <button id="share-btn" type="button" aria-label="Share this page">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="18" cy="5" r="3"></circle>
+        <circle cx="6" cy="12" r="3"></circle>
+        <circle cx="18" cy="19" r="3"></circle>
+        <line x1="8.6" y1="10.6" x2="15.4" y2="6.4"></line>
+        <line x1="8.6" y1="13.4" x2="15.4" y2="17.6"></line>
+      </svg>
+    </button>
+  </div>
+  <div id="toast"></div>
 </div>
 
 <script>
@@ -177,6 +246,34 @@
   const statusDot = document.querySelector('#status .dot');
   const recordValueEl = document.getElementById('record-value');
   const hintEl = document.getElementById('hint');
+  const shareBtn = document.getElementById('share-btn');
+  const toastEl = document.getElementById('toast');
+
+  let toastTimer = null;
+  function showToast(text){
+    toastEl.textContent = text;
+    toastEl.classList.add('visible');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('visible'), 1800);
+  }
+
+  shareBtn.addEventListener('click', async () => {
+    const shareData = {
+      title: 'Together',
+      text: 'Everyone here, right now.',
+      url: location.href
+    };
+    if (navigator.share){
+      try { await navigator.share(shareData); } catch(e){ /* cancelled — fine */ }
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(location.href);
+      showToast('link copied');
+    } catch(e){
+      showToast('copy failed');
+    }
+  });
 
   let W, H, DPR;
   function resize(){
