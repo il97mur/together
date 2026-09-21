@@ -454,6 +454,9 @@
   let dragging = false;
   let lastX = 0, lastY = 0;
   let lastInteraction = 0;
+  let velY = 0, velX = 0;
+  const SPIN_FRICTION = 0.95;
+  const SPIN_STOP = 0.006;
 
   function project(lat, lon, radius, cx, cy){
     const φ = lat * Math.PI/180;
@@ -477,6 +480,7 @@
 
   canvas.addEventListener('pointerdown', (e) => {
     dragging = true;
+    velY = 0; velX = 0;
     canvas.classList.add('dragging');
     canvas.setPointerCapture(e.pointerId);
     lastX = e.clientX; lastY = e.clientY;
@@ -488,8 +492,10 @@
     const dx = e.clientX - lastX;
     const dy = e.clientY - lastY;
     lastX = e.clientX; lastY = e.clientY;
-    rotY += dx * 0.28;
-    rotX = Math.max(-85, Math.min(85, rotX - dy * 0.28));
+    velY = dx * 0.28;
+    velX = -dy * 0.28;
+    rotY += velY;
+    rotX = Math.max(-85, Math.min(85, rotX + velX));
     lastInteraction = performance.now();
   });
   window.addEventListener('pointerup', () => {
@@ -594,7 +600,15 @@
       ctx.fill();
     });
 
-    if (!dragging && performance.now() - lastInteraction > 1200){
+    if (dragging){
+      // direct control, handled in pointermove
+    } else if (Math.abs(velY) > SPIN_STOP || Math.abs(velX) > SPIN_STOP){
+      rotY += velY;
+      rotX = Math.max(-85, Math.min(85, rotX + velX));
+      velY *= SPIN_FRICTION;
+      velX *= SPIN_FRICTION;
+      lastInteraction = performance.now();
+    } else if (performance.now() - lastInteraction > 1200){
       rotY += 0.045;
     }
   }
