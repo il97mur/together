@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Together</title>
+<meta name="description" content="A live wireframe globe — every open tab becomes a point of light.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --bg: #05060a;
+    --grid: rgba(140,165,220,0.28);
+    --peer: #6ee7f9;
+    --peer-glow: rgba(110,231,249,0.55);
+    --self: #ffd166;
+    --self-glow: rgba(255,209,102,0.65);
+    --ink: #eef2fb;
+    --ink-dim: #6b7690;
+  }
+  *{box-sizing:border-box;}
+  html, body{
+    height:100%;
+    margin:0;
+  }
+  body{
+    background: var(--bg);
+    color: var(--ink);
+    overflow:hidden;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+  }
+
+  #stage{
+    position:relative;
+    height:100%;
+    width:100%;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+  }
+
+  #glow-field{
+    position:absolute;
+    inset:0;
+    background:
+      radial-gradient(ellipse 60% 45% at 50% 42%, rgba(90,120,200,0.14), transparent 70%),
+      radial-gradient(ellipse 90% 60% at 50% 100%, rgba(20,30,60,0.5), transparent 60%);
+    pointer-events:none;
+  }
+
+  canvas{
+    display:block;
+    cursor:grab;
+    touch-action:none;
+  }
+  canvas.dragging{
+    cursor:grabbing;
+  }
+
+  #hint{
+    position:absolute;
+    bottom: 30%;
+    left:50%;
+    transform:translateX(-50%);
+    font-size:10px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color: var(--ink-dim);
+    opacity:0.8;
+    pointer-events:none;
+    transition: opacity 0.6s ease;
+  }
+  #hint.hidden{
+    opacity:0;
+  }
+
+  #wordmark{
+    position:absolute;
+    top: max(6vh, calc(28px + env(safe-area-inset-top, 0px)));
+    left:50%;
+    transform:translateX(-50%);
+    text-align:center;
+    pointer-events:none;
+  }
+  #wordmark .name{
+    font-family:'Fraunces', Georgia, serif;
+    font-optical-sizing:auto;
+    font-weight:300;
+    font-size:clamp(28px, 5vw, 46px);
+    letter-spacing:0.01em;
+    color: var(--ink);
+  }
+  #wordmark .tag{
+    margin-top:6px;
+    font-size:11px;
+    letter-spacing:0.16em;
+    text-transform:uppercase;
+    color: var(--ink-dim);
+  }
+
+  #readout{
+    position:absolute;
+    bottom: max(6vh, calc(30px + env(safe-area-inset-bottom, 0px)));
+    left:50%;
+    transform:translateX(-50%);
+    text-align:center;
+    pointer-events:none;
+  }
+  #count{
+    font-variant-numeric: tabular-nums;
+    font-size:clamp(30px, 6vw, 44px);
+    font-weight:500;
+    color: var(--ink);
+    line-height:1;
+  }
+  #count .unit{
+    font-size:12px;
+    font-weight:400;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    color: var(--ink-dim);
+    margin-left:8px;
+    vertical-align: 6px;
+  }
+  #status{
+    margin-top:10px;
+    font-size:11px;
+    letter-spacing:0.06em;
+    color: var(--ink-dim);
+  }
+  #status .dot{
+    display:inline-block;
+    width:6px;height:6px;border-radius:50%;
+    background: var(--self);
+    margin-right:7px;
+    box-shadow: 0 0 8px 1px var(--self-glow);
+    vertical-align:1px;
+  }
+  #record-line{
+    margin-top:6px;
+    font-size:10px;
+    letter-spacing:0.08em;
+    color: var(--ink-dim);
+    opacity:0.7;
+  }
+
+  @media (max-width: 480px){
+    #wordmark{ top: max(5vh, calc(20px + env(safe-area-inset-top, 0px))); }
+    #readout{ bottom: max(5vh, calc(22px + env(safe-area-inset-bottom, 0px))); }
+  }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <div id="glow-field"></div>
+  <canvas id="globe"></canvas>
+  <div id="hint">drag to rotate</div>
+  <div id="wordmark">
+    <div class="name">Together</div>
+    <div class="tag">everyone here, right now</div>
+  </div>
+  <div id="readout">
+    <div id="count">1<span class="unit">present</span></div>
+    <div id="status"><span class="dot"></span><span id="status-text">just you, for now</span></div>
+    <div id="record-line">record <span id="record-value">—</span> at once</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const canvas = document.getElementById('globe');
+  const ctx = canvas.getContext('2d');
+  const countEl = document.getElementById('count');
+  const statusText = document.getElementById('status-text');
+  const statusDot = document.querySelector('#status .dot');
+  const recordValueEl = document.getElementById('record-value');
+  const hintEl = document.getElementById('hint');
+
+  let W, H, DPR;
+  function resize(){
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = canvas.clientWidth = window.innerWidth;
+    H = canvas.clientHeight = window.innerHeight;
+    canvas.width = W * DPR;
+    canvas.height = H * DPR;
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function seededRandom(seed){
+    let s = seed % 2147483647;
+    if (s <= 0) s += 2147483646;
+    return function(){
+      s = (s * 16807) % 2147483647;
+      return (s - 1) / 2147483646;
+    };
+  }
+  function hashStr(str){
+    let h = 2166136261;
+    for (let i=0;i<str.length;i++){
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+
+  // approximate anchor point per IANA timezone (largest city / capital) —
+  // coarse on purpose: precise geolocation isn't worth the privacy ask here
+  const TZ_COORDS = {
+    'Africa/Abidjan':[5.3,-4.0],'Africa/Accra':[5.6,-0.2],'Africa/Addis_Ababa':[9.0,38.7],
+    'Africa/Algiers':[36.8,3.1],'Africa/Cairo':[30.0,31.2],'Africa/Casablanca':[33.6,-7.6],
+    'Africa/Johannesburg':[-26.2,28.0],'Africa/Khartoum':[15.5,32.5],'Africa/Lagos':[6.5,3.4],
+    'Africa/Nairobi':[-1.3,36.8],'Africa/Tunis':[36.8,10.2],
+    'America/Anchorage':[61.2,-149.9],'America/Bogota':[4.7,-74.1],'America/Buenos_Aires':[-34.6,-58.4],
+    'America/Chicago':[41.9,-87.6],'America/Denver':[39.7,-104.9],'America/Halifax':[44.6,-63.6],
+    'America/Lima':[-12.0,-77.0],'America/Los_Angeles':[34.0,-118.2],'America/Mexico_City':[19.4,-99.1],
+    'America/New_York':[40.7,-74.0],'America/Phoenix':[33.4,-112.1],'America/Santiago':[-33.4,-70.6],
+    'America/Sao_Paulo':[-23.5,-46.6],'America/Toronto':[43.7,-79.4],'America/Vancouver':[49.3,-123.1],
+    'Asia/Almaty':[43.2,76.9],'Asia/Amman':[31.9,35.9],'Asia/Baghdad':[33.3,44.4],
+    'Asia/Bangkok':[13.7,100.5],'Asia/Beirut':[33.9,35.5],'Asia/Dhaka':[23.8,90.4],
+    'Asia/Dubai':[25.2,55.3],'Asia/Hong_Kong':[22.3,114.2],'Asia/Istanbul':[41.0,28.9],
+    'Asia/Jakarta':[-6.2,106.8],'Asia/Jerusalem':[31.8,35.2],'Asia/Kabul':[34.5,69.2],
+    'Asia/Karachi':[24.9,67.0],'Asia/Kathmandu':[27.7,85.3],'Asia/Kolkata':[22.6,88.4],
+    'Asia/Kuala_Lumpur':[3.1,101.7],'Asia/Manila':[14.6,121.0],'Asia/Riyadh':[24.7,46.7],
+    'Asia/Seoul':[37.6,127.0],'Asia/Shanghai':[31.2,121.5],'Asia/Singapore':[1.35,103.8],
+    'Asia/Taipei':[25.0,121.6],'Asia/Tehran':[35.7,51.4],'Asia/Tokyo':[35.7,139.7],
+    'Asia/Yangon':[16.8,96.2],'Atlantic/Reykjavik':[64.1,-21.9],
+    'Australia/Adelaide':[-34.9,138.6],'Australia/Brisbane':[-27.5,153.0],'Australia/Darwin':[-12.5,130.8],
+    'Australia/Melbourne':[-37.8,145.0],'Australia/Perth':[-32.0,115.9],'Australia/Sydney':[-33.9,151.2],
+    'Europe/Amsterdam':[52.4,4.9],'Europe/Athens':[38.0,23.7],'Europe/Belgrade':[44.8,20.5],
+    'Europe/Berlin':[52.5,13.4],'Europe/Brussels':[50.85,4.35],'Europe/Bucharest':[44.4,26.1],
+    'Europe/Budapest':[47.5,19.0],'Europe/Copenhagen':[55.7,12.6],'Europe/Dublin':[53.3,-6.3],
+    'Europe/Helsinki':[60.2,24.9],'Europe/Kyiv':[50.5,30.5],'Europe/Lisbon':[38.7,-9.1],
+    'Europe/London':[51.5,-0.1],'Europe/Madrid':[40.4,-3.7],'Europe/Moscow':[55.75,37.6],
+    'Europe/Oslo':[59.9,10.7],'Europe/Paris':[48.85,2.35],'Europe/Prague':[50.1,14.4],
+    'Europe/Rome':[41.9,12.5],'Europe/Stockholm':[59.3,18.1],'Europe/Vienna':[48.2,16.4],
+    'Europe/Warsaw':[52.2,21.0],'Europe/Zurich':[47.4,8.5],
+    'Indian/Maldives':[4.2,73.5],
+    'Pacific/Auckland':[-36.8,174.8],'Pacific/Fiji':[-18.1,178.4],'Pacific/Guam':[13.5,144.8],
+    'Pacific/Honolulu':[21.3,-157.8]
+  };
+
+  function approxLocationFromTimezone(){
+    let base = null;
+    try{
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (tz && TZ_COORDS[tz]) base = TZ_COORDS[tz];
+    } catch(e){ /* Intl unavailable — fall through */ }
+
+    if (!base){
+      const offsetHours = -new Date().getTimezoneOffset() / 60;
+      base = [20, offsetHours * 15];
+    }
+    return base;
+  }
+
+  const rnd = seededRandom(hashStr('seed-' + Math.random()));
+  const [anchorLat, anchorLon] = approxLocationFromTimezone();
+  const self = {
+    id: null, // assigned by the server on connect
+    lat: Math.max(-85, Math.min(85, anchorLat + (rnd() - 0.5) * 8)),
+    lon: ((anchorLon + (rnd() - 0.5) * 10 + 540) % 360) - 180
+  };
+
+  const peers = new Map();
+  let record = 0;
+
+  // continents, roughly traced (lon, lat) — stylized low-fidelity coastlines
+  const CONTINENTS = [
+    [[-165,68],[-140,70],[-125,55],[-125,48],[-124,40],[-117,32],[-105,20],[-97,16],
+     [-90,15],[-81,25],[-80,32],[-75,35],[-70,41],[-65,45],[-55,50],[-60,60],
+     [-75,62],[-95,68],[-110,70],[-130,70],[-150,70],[-165,68]],
+    [[-79,8],[-77,0],[-80,-5],[-81,-15],[-75,-20],[-70,-30],[-71,-40],[-68,-52],
+     [-65,-55],[-58,-52],[-57,-38],[-48,-25],[-40,-15],[-35,-8],[-45,-2],
+     [-50,5],[-60,10],[-70,10],[-79,8]],
+    [[-17,15],[-16,25],[-6,35],[10,37],[20,33],[32,31],[35,27],[43,12],[51,12],
+     [45,0],[40,-10],[35,-20],[33,-27],[25,-34],[18,-34],[12,-18],[9,-5],
+     [8,4],[-5,5],[-10,7],[-17,15]],
+    [[-9,43],[-9,36],[0,38],[10,36],[15,38],[19,40],[23,36],[28,36],[30,45],
+     [28,45],[30,50],[25,54],[20,54],[14,54],[10,54],[5,51],[0,50],[-2,48],
+     [-4,48],[-5,43],[-9,43]],
+    [[28,45],[40,42],[50,45],[60,55],[70,55],[80,50],[90,50],[100,52],[110,52],
+     [120,50],[130,45],[140,45],[140,35],[130,30],[122,30],[110,20],[105,10],
+     [100,5],[95,15],[90,22],[80,20],[75,10],[68,25],[60,25],[50,30],[45,30],
+     [35,35],[28,45]],
+    [[114,-22],[120,-20],[130,-12],[136,-12],[142,-11],[148,-20],[153,-27],
+     [151,-33],[145,-38],[140,-38],[135,-35],[130,-32],[122,-34],[115,-34],
+     [113,-26],[114,-22]],
+    [[-45,60],[-50,65],[-55,70],[-45,75],[-30,75],[-25,68],[-35,62],[-45,60]]
+  ];
+
+  const R_SCALE = 0.34;
+
+  let rotY = 0;
+  let rotX = -14;
+  let dragging = false;
+  let lastX = 0, lastY = 0;
+  let lastInteraction = 0;
+
+  function project(lat, lon, radius, cx, cy){
+    const φ = lat * Math.PI/180;
+    const λ = lon * Math.PI/180;
+    let x = Math.cos(φ) * Math.sin(λ);
+    let y = Math.sin(φ);
+    let z = Math.cos(φ) * Math.cos(λ);
+
+    const ry = rotY * Math.PI/180;
+    const x1 = x*Math.cos(ry) + z*Math.sin(ry);
+    const z1 = -x*Math.sin(ry) + z*Math.cos(ry);
+    x = x1; z = z1;
+
+    const rx = rotX * Math.PI/180;
+    const y1 = y*Math.cos(rx) - z*Math.sin(rx);
+    const z2 = y*Math.sin(rx) + z*Math.cos(rx);
+    y = y1; z = z2;
+
+    return { x: cx + x*radius, y: cy - y*radius, z };
+  }
+
+  canvas.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    canvas.classList.add('dragging');
+    canvas.setPointerCapture(e.pointerId);
+    lastX = e.clientX; lastY = e.clientY;
+    lastInteraction = performance.now();
+    hintEl.classList.add('hidden');
+  });
+  window.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - lastX;
+    const dy = e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    rotY += dx * 0.28;
+    rotX = Math.max(-85, Math.min(85, rotX - dy * 0.28));
+    lastInteraction = performance.now();
+  });
+  window.addEventListener('pointerup', () => {
+    dragging = false;
+    canvas.classList.remove('dragging');
+  });
+
+  function drawGlobe(t){
+    ctx.clearRect(0,0,W,H);
+    const cx = W/2, cy = H*0.46;
+    const R = Math.min(W,H) * R_SCALE;
+
+    const aura = ctx.createRadialGradient(cx,cy,R*0.7,cx,cy,R*1.5);
+    aura.addColorStop(0, 'rgba(120,150,220,0.10)');
+    aura.addColorStop(1, 'rgba(120,150,220,0)');
+    ctx.fillStyle = aura;
+    ctx.beginPath();
+    ctx.arc(cx,cy,R*1.5,0,Math.PI*2);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(cx,cy,R,0,Math.PI*2);
+    ctx.strokeStyle = 'rgba(140,165,220,0.18)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    for (let lat = -60; lat <= 60; lat += 30){
+      ctx.beginPath();
+      let started = false;
+      for (let lon = 0; lon <= 360; lon += 4){
+        const p = project(lat, lon, R, cx, cy);
+        const front = p.z > -0.02;
+        if (!front){ started = false; continue; }
+        if (!started){ ctx.moveTo(p.x,p.y); started = true; }
+        else ctx.lineTo(p.x,p.y);
+      }
+      ctx.strokeStyle = 'rgba(140,165,220,0.10)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    for (let lon = 0; lon < 360; lon += 30){
+      ctx.beginPath();
+      let started = false;
+      for (let lat = -90; lat <= 90; lat += 4){
+        const p = project(lat, lon, R, cx, cy);
+        const front = p.z > -0.02;
+        if (!front){ started = false; continue; }
+        if (!started){ ctx.moveTo(p.x,p.y); started = true; }
+        else ctx.lineTo(p.x,p.y);
+      }
+      ctx.strokeStyle = 'rgba(140,165,220,0.10)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    CONTINENTS.forEach(shape => {
+      ctx.beginPath();
+      let started = false;
+      for (let i = 0; i <= shape.length; i++){
+        const [lon, lat] = shape[i % shape.length];
+        const p = project(lat, lon, R, cx, cy);
+        const front = p.z > -0.02;
+        if (!front){ started = false; continue; }
+        if (!started){ ctx.moveTo(p.x,p.y); started = true; }
+        else ctx.lineTo(p.x,p.y);
+      }
+      ctx.strokeStyle = 'rgba(185,205,240,0.55)';
+      ctx.lineWidth = 1.2;
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    });
+
+    const points = [{...self, kind:'self'}];
+    peers.forEach(p => points.push({...p, kind:'peer'}));
+    points.sort((a,b) => {
+      const za = project(a.lat,a.lon,R,cx,cy).z;
+      const zb = project(b.lat,b.lon,R,cx,cy).z;
+      return za - zb;
+    });
+
+    points.forEach(p => {
+      const proj = project(p.lat, p.lon, R, cx, cy);
+      const front = proj.z > -0.05;
+      const depthAlpha = Math.max(0.12, (proj.z + 1) / 2);
+      const isSelf = p.kind === 'self';
+      const baseR = isSelf ? 4.2 : 3.4;
+      const pulse = isSelf ? (Math.sin(t/700) * 0.6 + 1) : (Math.sin(t/900 + hashStr(p.id||'x')) * 0.4 + 1);
+      const rad = baseR * pulse * (front ? 1 : 0.7);
+      const color = isSelf ? '255,209,102' : '110,231,249';
+
+      const glow = ctx.createRadialGradient(proj.x, proj.y, 0, proj.x, proj.y, rad*4.5);
+      glow.addColorStop(0, `rgba(${color},${0.9*depthAlpha})`);
+      glow.addColorStop(1, `rgba(${color},0)`);
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(proj.x, proj.y, rad*4.5, 0, Math.PI*2);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(proj.x, proj.y, rad, 0, Math.PI*2);
+      ctx.fillStyle = `rgba(${color},${Math.min(1, depthAlpha+0.15)})`;
+      ctx.fill();
+    });
+
+    if (!dragging && performance.now() - lastInteraction > 1200){
+      rotY += 0.045;
+    }
+  }
+
+  function loop(t){
+    drawGlobe(t);
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  function updateReadout(){
+    const n = 1 + peers.size;
+    countEl.childNodes[0].nodeValue = String(n);
+    if (peers.size === 0){
+      statusText.textContent = 'just you, for now';
+      statusDot.style.background = 'var(--self)';
+    } else {
+      statusText.textContent = peers.size === 1
+        ? 'one other person is here'
+        : peers.size + ' other people are here';
+      statusDot.style.background = 'var(--peer)';
+    }
+    recordValueEl.textContent = record || '—';
+  }
+
+  // --- realtime connection (PartyKit) ---
+
+  function partyHost(){
+    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1'){
+      return { host: 'localhost:1999', proto: 'ws' };
+    }
+    // update this after your first `npx partykit deploy` if the assigned host differs
+    return { host: 'together.il97mur.partykit.dev', proto: 'wss' };
+  }
+
+  function connect(){
+    const { host, proto } = partyHost();
+    const ws = new WebSocket(`${proto}://${host}/parties/main/globe`);
+
+    ws.addEventListener('message', (evt) => {
+      let msg;
+      try { msg = JSON.parse(evt.data); } catch(e) { return; }
+
+      if (msg.type === 'welcome'){
+        self.id = msg.selfId;
+        record = msg.record || 0;
+        ws.send(JSON.stringify({ type: 'presence', lat: self.lat, lon: self.lon }));
+        updateReadout();
+      } else if (msg.type === 'peers'){
+        peers.clear();
+        (msg.peers || []).forEach(p => {
+          if (p.id === self.id) return;
+          peers.set(p.id, { lat: p.lat, lon: p.lon });
+        });
+        updateReadout();
+      } else if (msg.type === 'record'){
+        record = msg.record || record;
+        updateReadout();
+      }
+    });
+
+    ws.addEventListener('close', () => {
+      peers.clear();
+      updateReadout();
+      setTimeout(connect, 1500);
+    });
+    ws.addEventListener('error', () => ws.close());
+  }
+
+  updateReadout();
+  connect();
+})();
+</script>
+</body>
+</html>
